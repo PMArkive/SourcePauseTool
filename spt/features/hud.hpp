@@ -108,7 +108,12 @@ private:
 	ConVar* cl_showpos = nullptr;
 	ConVar* cl_showfps = nullptr;
 
+	// If we found both StartDrawing and FinishDrawing
+	bool foundDrawingFuncs = false;
+
 	DECL_HOOK_THISCALL(void, CEngineVGui__Paint, void*, PaintMode_t mode);
+	DECL_MEMBER_THISCALL(void, CMatSystemSurface__StartDrawing, void*);
+	DECL_MEMBER_THISCALL(void, CMatSystemSurface__FinishDrawing, void*);
 
 	void DrawHUD(bool overlay);
 	void DrawDefaultHUD();

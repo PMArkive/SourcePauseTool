@@ -398,11 +398,28 @@ namespace patterns
 	         "55 8B EC 83 EC 2C 53 8B D9 8B 0D ?? ?? ?? ?? 56",
 	         "4044",
 	         "6A FF 68 ?? ?? ?? ?? 64 A1 ?? ?? ?? ?? 50 64 89 25 ?? ?? ?? ?? 83 EC 1C 56 6A 04");
-
+	PATTERNS(
+	    CMatSystemSurface__StartDrawing,
+	    "5135",
+	    "55 8B EC 83 E4 C0 83 EC 38 80 ?? ?? ?? ?? ?? ?? 56 57 8B F9 75 57 8B ?? ?? ?? ?? ?? C6 ?? ?? ?? ?? ?? ?? FF ?? 8B 10 6A 00 8B C8 8B 42 20",
+	    "7462488",
+	    "55 8B EC 64 A1 ?? ?? ?? ?? 6A FF 68 ?? ?? ?? ?? 50 64 89 25 ?? ?? ?? ?? 83 EC 14",
+	    "BMS-Retail-0.9",
+	    "55 8B EC 6A FF 68 ?? ?? ?? ?? 64 A1 ?? ?? ?? ?? 50 83 EC 14 56 57 A1 ?? ?? ?? ?? 33 C5 50 8D 45 F4 64 A3 ?? ?? ?? ?? 8B F9 80 3D ?? ?? ?? ?? 00");
+	PATTERNS(
+	    CMatSystemSurface__FinishDrawing,
+	    "5135",
+	    "56 6A 00 E8 ?? ?? ?? ?? 8B ?? ?? ?? ?? ?? 8B 01 8B ?? ?? ?? ?? ?? 83 C4 04 FF D2 8B F0 85 F6 74 09 8B 06 8B 50 08 8B CE FF D2",
+	    "7462488",
+	    "55 8B EC 6A FF 68 ?? ?? ?? ?? 64 A1 ?? ?? ?? ?? 50 64 89 25 ?? ?? ?? ?? 51 56 6A 00",
+	    "BMS-Retail-0.9",
+	    "55 8B EC 6A FF 68 ?? ?? ?? ?? 64 A1 ?? ?? ?? ?? 50 51 56 A1 ?? ?? ?? ?? 33 C5 50 8D 45 ?? 64 A3 ?? ?? ?? ?? 6A 00");
 } // namespace patterns
 
 void HUDFeature::InitHooks()
 {
+	FIND_PATTERN(vguimatsurface, CMatSystemSurface__StartDrawing);
+	FIND_PATTERN(vguimatsurface, CMatSystemSurface__FinishDrawing);
 	HOOK_FUNCTION(engine, CEngineVGui__Paint);
 }
 
@@ -509,6 +526,13 @@ void HUDFeature::LoadFeature()
 	cl_showfps = g_pCVar->FindVar("cl_showfps");
 	bool result = spt_hud_feat.AddHudDefaultGroup(
 	    HudCallback(std::bind(&HUDFeature::DrawDefaultHUD, this), []() { return y_spt_hud.GetBool(); }, false));
+
+	if (ORIG_CMatSystemSurface__StartDrawing && ORIG_CMatSystemSurface__FinishDrawing)
+	{
+		// These two functions are optional. HUD looks better with them, but it can work without them too (just with some visual glitches).
+		foundDrawingFuncs = true;
+	}
+
 	if (result)
 	{
 		InitConcommandBase(y_spt_hud);
@@ -566,6 +590,9 @@ void HUDFeature::DrawDefaultHUD()
 
 void HUDFeature::DrawHUD(bool overlay)
 {
+	if (foundDrawingFuncs)
+		ORIG_CMatSystemSurface__StartDrawing(interfaces::mat_system_surface);
+
 	try
 	{
 		// Draw default callbacks
@@ -630,6 +657,9 @@ void HUDFeature::DrawHUD(bool overlay)
 	{
 		Msg("Error drawing HUD: %s\n", e.what());
 	}
+
+	if (foundDrawingFuncs)
+		ORIG_CMatSystemSurface__FinishDrawing(interfaces::mat_system_surface);
 }
 
 IMPL_HOOK_THISCALL(HUDFeature, void, CEngineVGui__Paint, void*, PaintMode_t mode)
