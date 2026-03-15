@@ -13,8 +13,49 @@
 #undef max
 #undef min
 
+#include <cmath>
+
 namespace aim
 {
+	bool ParseInterpType(const char* str, InterpType& out)
+	{
+		if (stricmp(str, "linear") == 0)
+			out = InterpType::LINEAR;
+		else if (stricmp(str, "sine") == 0 || stricmp(str, "sin") == 0)
+			out = InterpType::SINE;
+		else if (stricmp(str, "cubic") == 0)
+			out = InterpType::CUBIC;
+		else if (stricmp(str, "exponential") == 0 || stricmp(str, "exp") == 0)
+			out = InterpType::EXPONENTIAL;
+		else
+			return false;
+		return true;
+	}
+
+	static float InterpEase(float t, InterpType type)
+	{
+		if (t <= 0.0f)
+			return 0.0f;
+		if (t >= 1.0f)
+			return 1.0f;
+
+		switch (type)
+		{
+		case InterpType::SINE:
+			return (1.0f - std::cos(t * M_PI)) * 0.5f;
+		case InterpType::CUBIC:
+			if (t < 0.5f)
+				return 4.0f * t * t * t;
+			return 1.0f - std::pow(-2.0f * t + 2.0f, 3.0f) * 0.5f;
+		case InterpType::EXPONENTIAL:
+			if (t < 0.5f)
+				return std::pow(2.0f, 20.0f * t - 10.0f) * 0.5f;
+			return (2.0f - std::pow(2.0f, -20.0f * t + 10.0f)) * 0.5f;
+		default:
+			return t; // linear
+		}
+	}
+
 	float angleChange(float value,
 	                  float prevValue,
 	                  float target,
@@ -22,7 +63,9 @@ namespace aim
 	                  bool timedChange,
 	                  int ticksLeft,
 	                  bool yaw,
-	                  bool jumpedLastTick)
+	                  bool jumpedLastTick,
+	                  InterpType interpolationType,
+	                  int totalTicks)
 	{
 		float diff;
 
@@ -56,8 +99,9 @@ namespace aim
 		{
 			return target;
 		}
-		else
+		else if (interpolationType == InterpType::LINEAR)
 		{
+			// Ensure backwards compatibility
 			if (yaw)
 			{
 				return utils::NormalizeDeg(value + diff / ticksLeft);
@@ -67,15 +111,38 @@ namespace aim
 				return value + diff / ticksLeft;
 			}
 		}
+		else
+		{
+			if (totalTicks <= 0)
+				return target;
+
+			float elapsedTicks = totalTicks - ticksLeft;
+			float factorNow = elapsedTicks / totalTicks;
+			float factorNext = (elapsedTicks + 1.0f) / totalTicks;
+
+			float easedNow = InterpEase(factorNow, interpolationType);
+			float easedNext = InterpEase(factorNext, interpolationType);
+
+			float remainingFraction = 1.0f - easedNow;
+			float step =
+			    (remainingFraction > 0.0f) ? diff * (easedNext - easedNow) / remainingFraction : 0.0f;
+
+			if (yaw)
+				return utils::NormalizeDeg(value + step);
+			else
+				return value + step;
+		}
 	}
 
 	ViewState::ViewState()
 	{
 		targetID = -1;
 		ticksLeft = 0;
+		totalTicks = 0;
 		state = NO_AIM;
 		timedChange = false;
 		jumpedLastTick = false;
+		interpolationType = InterpType::LINEAR;
 	}
 
 	float ViewState::CalculateNewYaw(float newYaw, const Strafe::StrafeInput& strafeInput)
@@ -91,7 +158,9 @@ namespace aim
 			                           false,
 			                           0,
 			                           true,
-			                           jumpedLastTick);
+			                           jumpedLastTick,
+			                           InterpType::LINEAR,
+			                           0);
 		}
 		else if (state != NO_AIM)
 		{
@@ -102,7 +171,9 @@ namespace aim
 			                           timedChange,
 			                           ticksLeft,
 			                           true,
-			                           jumpedLastTick);
+			                           jumpedLastTick,
+			                           interpolationType,
+			                           totalTicks);
 		}
 		else
 		{
@@ -122,7 +193,9 @@ namespace aim
 			                             timedChange,
 			                             ticksLeft,
 			                             false,
-			                             jumpedLastTick);
+			                             jumpedLastTick,
+			                             interpolationType,
+			                             totalTicks);
 		else
 			current[PITCH] = newPitch;
 		return current[PITCH];

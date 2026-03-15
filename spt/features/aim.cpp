@@ -8,6 +8,7 @@
 #include "signals.hpp"
 #include "tas.hpp"
 #include "interfaces.hpp"
+#include "string_utils.hpp"
 
 #undef min
 #undef max
@@ -21,7 +22,7 @@ ConVar _y_spt_pitchspeed("_y_spt_pitchspeed", "0", FCVAR_TAS_RESET);
 ConVar _y_spt_yawspeed("_y_spt_yawspeed", "0", FCVAR_TAS_RESET);
 ConVar tas_anglespeed("tas_anglespeed",
                       "5",
-                      FCVAR_CHEAT,
+                      FCVAR_TAS_RESET,
                       "Determines the speed of angle changes when using spt_tas_aim or when TAS strafing\n");
 
 AimFeature spt_aim;
@@ -141,15 +142,30 @@ CON_COMMAND(tas_aim_reset, "Resets spt_tas_aim state")
 {
 	spt_aim.viewState.state = aim::ViewState::AimState::NO_AIM;
 	spt_aim.viewState.ticksLeft = 0;
+	spt_aim.viewState.totalTicks = 0;
 	spt_aim.viewState.timedChange = false;
 	spt_aim.viewState.jumpedLastTick = false;
 }
 
-CON_COMMAND(tas_aim, "Aims at an angle")
+#define TAS_AIM_INTERP_HELP_MSG \
+	"  Interpolation (in string name) (`ticks` is required):\n" \
+	"    linear (default)\n" \
+	"    sine/sin\n" \
+	"    cubic\n" \
+	"    exponential/exp\n"
+#define TAS_AIM_CONE_HELP_MSG \
+	"  Weapon cone (in integer degrees):\n" \
+	"    3: AR2\n" \
+	"    5: Pistol & SMG\n"
+
+#define TAS_AIM_USAGE_MSG \
+	"Usage: spt_tas_aim <pitch> <yaw> [ticks] [cone] [interp]\n" TAS_AIM_CONE_HELP_MSG TAS_AIM_INTERP_HELP_MSG
+
+CON_COMMAND(tas_aim, "Aims at an angle.\n" TAS_AIM_USAGE_MSG)
 {
-	if (args.ArgC() < 3)
+	if (args.ArgC() < 3 || args.ArgC() > 6)
 	{
-		Msg("Usage: spt_tas_aim <pitch> <yaw> [ticks] [cone]\nWeapon cones(in degrees):\n\t- AR2: 3\n\t- Pistol & SMG: 5\n");
+		Msg(TAS_AIM_USAGE_MSG);
 		return;
 	}
 
@@ -157,12 +173,43 @@ CON_COMMAND(tas_aim, "Aims at an angle")
 	float yaw = utils::NormalizeDeg(std::atof(args.Arg(2)));
 	int frames = -1;
 	int cone = -1;
+	aim::InterpType interp = aim::InterpType::LINEAR;
 
 	if (args.ArgC() >= 4)
-		frames = std::atoi(args.Arg(3));
+	{
+		if (!ParseInt(args.Arg(3), frames))
+		{
+			Warning("spt_tas_aim: Invalid tick count: %s\n", args.Arg(3));
+			return;
+		}
+	}
 
-	if (args.ArgC() >= 5)
-		cone = std::atoi(args.Arg(4));
+	if (args.ArgC() == 5)
+	{
+		// This can be cone or interp
+		if (!ParseInt(args.Arg(4), cone))
+		{
+			if (!aim::ParseInterpType(args.Arg(4), interp))
+			{
+				Warning("spt_tas_aim: Unknown interpolation type: %s\n", args.Arg(4));
+				return;
+			}
+			cone = -1;
+		}
+	}
+	else if (args.ArgC() == 6)
+	{
+		if (!ParseInt(args.Arg(4), cone))
+		{
+			Warning("spt_tas_aim: Invalid cone value: %s\n", args.Arg(4));
+			return;
+		}
+		if (!aim::ParseInterpType(args.Arg(5), interp))
+		{
+			Warning("spt_tas_aim: Unknown interpolation type: %s\n", args.Arg(5));
+			return;
+		}
+	}
 
 	QAngle angle(pitch, yaw, 0);
 	QAngle aimAngle = angle;
@@ -172,14 +219,14 @@ CON_COMMAND(tas_aim, "Aims at an angle")
 		if (!utils::spt_clientEntList.GetPlayer())
 		{
 			Warning(
-			    "Trying to apply nospread while map not loaded in! Wait until map is loaded before issuing spt_tas_aim with spread cone set.\n");
+			    "spt_tas_aim: Trying to apply nospread while map not loaded in! Wait until map is loaded before issuing spt_tas_aim with spread cone set.\n");
 			return;
 		}
 
 		Vector vecSpread;
 		if (!aim::GetCone(cone, vecSpread))
 		{
-			Warning("Couldn't find cone: %s\n", args.Arg(4));
+			Warning("spt_tas_aim: Couldn't find cone: %s\n", args.Arg(4));
 			return;
 		}
 
@@ -199,78 +246,143 @@ CON_COMMAND(tas_aim, "Aims at an angle")
 
 	spt_aim.viewState.state = aim::ViewState::AimState::ANGLES;
 	spt_aim.viewState.target = aimAngle;
+	spt_aim.viewState.interpolationType = interp;
 
 	if (frames == -1)
 	{
 		spt_aim.viewState.timedChange = false;
+		spt_aim.viewState.totalTicks = 0;
 	}
 	else
 	{
 		spt_aim.viewState.timedChange = true;
 		spt_aim.viewState.ticksLeft = std::max(1, frames);
+		spt_aim.viewState.totalTicks = spt_aim.viewState.ticksLeft;
 	}
 }
 
-CON_COMMAND(tas_aim_pos, "Aims at a position")
+#define TAS_AIM_POS_USAGE_MSG "Usage: spt_tas_aim_pos <x> <y> <z> [ticks] [interp]\n" TAS_AIM_INTERP_HELP_MSG
+
+CON_COMMAND(tas_aim_pos, "Aims at a position.\n" TAS_AIM_POS_USAGE_MSG)
 {
 	int argc = args.ArgC();
-	if (argc != 4 && argc != 5)
+	if (argc < 4 || argc > 6)
 	{
-		Msg("Usage: spt_tas_aim_pos <x> <y> <z> [ticks]\n");
+		Msg(TAS_AIM_POS_USAGE_MSG);
 		return;
 	}
 
 	int frames = -1;
-	if (argc == 5)
-		frames = std::atoi(args.Arg(4));
+	aim::InterpType interp = aim::InterpType::LINEAR;
+
+	if (argc >= 5)
+	{
+		if (!ParseInt(args.Arg(4), frames))
+		{
+			Warning("spt_tas_aim_pos: Invalid tick count: %s\n", args.Arg(4));
+			return;
+		}
+	}
+
+	if (argc == 6)
+	{
+		if (!aim::ParseInterpType(args.Arg(5), interp))
+		{
+			Warning("spt_tas_aim_pos: Unknown interpolation type: %s\n", args.Arg(5));
+			return;
+		}
+	}
 
 	spt_aim.viewState.state = aim::ViewState::AimState::POSITION;
 	spt_aim.viewState.targetPos = Vector(std::atof(args.Arg(1)), std::atof(args.Arg(2)), std::atof(args.Arg(3)));
+	spt_aim.viewState.interpolationType = interp;
 
 	if (frames == -1)
 	{
 		spt_aim.viewState.timedChange = false;
+		spt_aim.viewState.totalTicks = 0;
 	}
 	else
 	{
 		spt_aim.viewState.timedChange = true;
 		spt_aim.viewState.ticksLeft = std::max(1, frames);
+		spt_aim.viewState.totalTicks = spt_aim.viewState.ticksLeft;
 	}
 }
 
-CON_COMMAND(tas_aim_ent, "Aim at the absolute origin of a entity with offsets (optional)")
+#define TAS_AIM_ENT_USAGE_MSG "Usage: spt_tas_aim_ent <id> [x y z] [ticks] [interp]\n" TAS_AIM_INTERP_HELP_MSG
+
+CON_COMMAND(tas_aim_ent, "Aim at the absolute origin of an entity.\n" TAS_AIM_ENT_USAGE_MSG)
 {
 	int argc = args.ArgC();
-	if (argc != 2 && argc != 3 && argc != 5 && argc != 6)
+	if (argc < 2 || argc > 7)
 	{
-		Msg("Usage: spt_tas_aim_ent <id> [x y z] [ticks]\n");
+		Msg(TAS_AIM_ENT_USAGE_MSG);
 		return;
 	}
 
+	int id = 0;
+	Vector offset = Vector(0.0f, 0.0f, 0.0f);
 	int frames = -1;
+	aim::InterpType interp = aim::InterpType::LINEAR;
+
+	// 2: spt_tas_aim_ent <id>
+	// 3: spt_tas_aim_ent <id> [ticks]
+	// 4: spt_tas_aim_ent <id> [ticks] [interp]
+	// 5: spt_tas_aim_ent <id> [x y z]
+	// 6: spt_tas_aim_ent <id> [x y z] [ticks]
+	// 7: spt_tas_aim_ent <id> [x y z] [ticks] [interp]
+
+	if (!ParseInt(args.Arg(1), id))
+	{
+		Warning("spt_tas_aim_ent: Invalid entity ID: %s\n", args.Arg(1));
+		return;
+	}
+	if (tas_strafe_version.GetInt() < 8)
+		id++; // backwards compat for old entity index logic
+
+	if (argc >= 5)
+	{
+		offset = Vector(std::atof(args.Arg(2)), std::atof(args.Arg(3)), std::atof(args.Arg(4)));
+	}
+
 	if (argc == 3 || argc == 6)
 	{
-		frames = std::atoi(args.Arg(argc - 1));
+		if (!ParseInt(args.Arg(argc - 1), frames))
+		{
+			Warning("spt_tas_aim_ent: Invalid tick count: %s\n", args.Arg(argc - 1));
+			return;
+		}
 	}
-	if (argc >= 5)
-		spt_aim.viewState.targetPos =
-		    Vector(std::atof(args.Arg(2)), std::atof(args.Arg(3)), std::atof(args.Arg(4)));
-	else
-		spt_aim.viewState.targetPos = Vector(0.0f, 0.0f, 0.0f);
+	else if (argc == 4 || argc == 7)
+	{
+		if (!aim::ParseInterpType(args.Arg(argc - 1), interp))
+		{
+			Warning("spt_tas_aim_ent: Unknown interpolation type: %s\n", args.Arg(argc - 1));
+			return;
+		}
+		if (!ParseInt(args.Arg(argc - 2), frames))
+		{
+			Warning("spt_tas_aim_ent: Invalid tick count: %s\n", args.Arg(argc - 2));
+			return;
+		}
+	}
 
 	spt_aim.viewState.state = aim::ViewState::AimState::ENTITY;
-	spt_aim.viewState.targetID = std::atoi(args.Arg(1));
-	if (tas_strafe_version.GetInt() < 8)
-		spt_aim.viewState.targetID += 1; // backwards compat for old entity index logic
+	spt_aim.viewState.targetID = id;
+	spt_aim.viewState.targetPos = offset;
+	spt_aim.viewState.interpolationType = interp;
 
 	if (frames == -1)
 	{
 		spt_aim.viewState.timedChange = false;
+		spt_aim.viewState.totalTicks = 0;
 	}
 	else
 	{
 		spt_aim.viewState.timedChange = true;
 		spt_aim.viewState.ticksLeft = std::max(1, frames);
+		spt_aim.viewState.totalTicks = spt_aim.viewState.ticksLeft;
 	}
 }
 

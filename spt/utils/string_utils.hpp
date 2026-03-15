@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <wchar.h>
+#include <charconv>
 #include <tier0\wchartypes.h>
 
 bool whiteSpacesOnly(const std::string& s);
@@ -135,4 +136,10 @@ inline bool IsValue(std::string s)
 	std::stringstream ss(s);
 	T result = 0;
 	return bool(ss >> result);
+}
+
+inline bool ParseInt(std::string_view s, int& out)
+{
+	auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), out);
+	return ec == std::errc() && ptr == s.data() + s.size();
 }

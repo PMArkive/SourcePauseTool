@@ -10,6 +10,17 @@
 
 namespace aim
 {
+	enum class InterpType
+	{
+		LINEAR = 0,
+		SINE,
+		CUBIC,
+		EXPONENTIAL,
+	};
+
+	// Returns false if the string is not a recognized interp type name.
+	bool ParseInterpType(const char* str, InterpType& out);
+
 	struct ViewState
 	{
 		enum AimState
@@ -28,8 +39,11 @@ namespace aim
 		int targetID;
 
 		int ticksLeft;
+		int totalTicks;
 		bool timedChange;
 		bool jumpedLastTick;
+
+		InterpType interpolationType;
 
 		ViewState();
 		float CalculateNewYaw(float newYaw, const Strafe::StrafeInput& strafeInput);
