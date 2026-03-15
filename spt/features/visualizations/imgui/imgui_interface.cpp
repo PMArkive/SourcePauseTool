@@ -973,9 +973,62 @@ IMPL_HOOK_THISCALL(SptImGuiFeature, void, CShaderDeviceDx8__Present, void*)
 
 IMPL_HOOK_STDCALL(SptImGuiFeature, HCURSOR, SetCursor, HCURSOR hCursor)
 {
+	static bool cursorVisible = true;
+	if (!hCursor)
+	{
+		// Always let the game hide the cursor
+		cursorVisible = false;
+		return ORIG_SetCursor(hCursor);
+	}
+
 	// imgui wants to capture mouse -> let imgui set cursor, otherwise let the game do it
 	if (!inImGuiUpdateSection ^ ImGui::GetIO().WantCaptureMouse)
 		return ORIG_SetCursor(hCursor);
+
+	if (!cursorVisible)
+	{
+		cursorVisible = true;
+
+		// Set the cursor to imgui's
+		LPTSTR cursorName = IDC_ARROW;
+		switch (ImGui::GetMouseCursor())
+		{
+		case ImGuiMouseCursor_Arrow:
+			cursorName = IDC_ARROW;
+			break;
+		case ImGuiMouseCursor_TextInput:
+			cursorName = IDC_IBEAM;
+			break;
+		case ImGuiMouseCursor_ResizeAll:
+			cursorName = IDC_SIZEALL;
+			break;
+		case ImGuiMouseCursor_ResizeNS:
+			cursorName = IDC_SIZENS;
+			break;
+		case ImGuiMouseCursor_ResizeEW:
+			cursorName = IDC_SIZEWE;
+			break;
+		case ImGuiMouseCursor_ResizeNESW:
+			cursorName = IDC_SIZENESW;
+			break;
+		case ImGuiMouseCursor_ResizeNWSE:
+			cursorName = IDC_SIZENWSE;
+			break;
+		case ImGuiMouseCursor_Hand:
+			cursorName = IDC_HAND;
+			break;
+		case ImGuiMouseCursor_Wait:
+			cursorName = IDC_WAIT;
+			break;
+		case ImGuiMouseCursor_Progress:
+			cursorName = IDC_APPSTARTING;
+			break;
+		case ImGuiMouseCursor_NotAllowed:
+			cursorName = IDC_NO;
+			break;
+		}
+		return ORIG_SetCursor(LoadCursor(NULL, cursorName));
+	}
 	return NULL;
 }
 
