@@ -185,12 +185,10 @@ void PlayerIOFeature::PreHook()
 
 Strafe::MovementVars PlayerIOFeature::GetMovementVars()
 {
-	auto vars = Strafe::MovementVars();
+	Strafe::MovementVars vars = {0};
 
 	if (!playerioAddressesWereFound || cinput_thisptr == nullptr)
-	{
 		return vars;
-	}
 
 	auto maxspeed = m_flMaxspeed.GetValue();
 
@@ -361,19 +359,19 @@ bool PlayerIOFeature::GetFlagsDucking()
 
 Strafe::PlayerData PlayerIOFeature::GetPlayerData()
 {
-	if (!playerioAddressesWereFound)
-		return Strafe::PlayerData();
-
 	Strafe::PlayerData data;
-	if (tas_strafe_version.GetInt() >= 9)
-		data.Init();
+	data.Init();
+
+	if (!playerioAddressesWereFound || cinput_thisptr == nullptr)
+		return data;
+
 	const int IN_DUCK = 1 << 2;
 
 	data.Ducking = GetFlagsDucking();
 	data.DuckPressed = (ORIG_GetButtonBits(cinput_thisptr, 0) & IN_DUCK);
 	data.UnduckedOrigin = m_vecAbsOrigin.GetValue();
 	data.Velocity = GetPlayerVelocity();
-	data.Basevelocity = Vector();
+	data.Basevelocity = vec3_origin;
 
 	if (data.Ducking)
 	{
@@ -473,6 +471,9 @@ bool PlayerIOFeature::IsGroundEntitySet()
 
 bool PlayerIOFeature::TryJump()
 {
+	if (cinput_thisptr == nullptr)
+		return false;
+
 	const int IN_JUMP = (1 << 1);
 	return ORIG_GetButtonBits(cinput_thisptr, 0) & IN_JUMP;
 }
