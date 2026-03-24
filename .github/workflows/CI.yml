@@ -32,14 +32,14 @@ jobs:
           - { name: "Release OE",   file: "build/Release/spt-oe.dll" }
     steps:
       - name: Checkout SPT
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Checkout submodules
         run: git submodule update --init -j $env:NUMBER_OF_PROCESSORS SPTLib
       - name: Configure CMake
         run: cmake --preset base-x86
       - name: Build
         run: cmake --build --preset "${{matrix.preset.name}}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: ${{matrix.preset.name}}
           path: ${{github.workspace}}/${{matrix.preset.file}}
